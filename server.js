@@ -146,8 +146,12 @@ function rewriteHtml(html, target) {
       const raw = typeof value === "string" ? value : value?.url;
       if (!raw) return value;
       const u = new URL(raw, origin + "/");
-      if (u.origin !== origin) return value;
-      if (u.pathname.startsWith("/proxy")) return value;
+      if (!["http:", "https:"].includes(u.protocol)) return value;
+      if (u.pathname.startsWith("/proxy") && u.origin === location.origin) return value;
+
+      // Modern sites such as YouTube call APIs on different origins
+      // (e.g. youtubei.googleapis.com). Those requests must also stay inside
+      // the proxy or Safari will see a mixed/offline app.
       const proxied = prefix + encodeURIComponent(u.href);
       if (typeof value === "string") return proxied;
       return new Request(proxied, value);
@@ -261,6 +265,19 @@ function requestUpstream(url, method, headers, req) {
   });
 }
 
+function setProxySafeCookies(headers, res) {
+  const raw = headers["set-cookie"];
+  if (!raw) return;
+
+  const cookies = (Array.isArray(raw) ? raw : [raw]).map((cookie) =>
+    cookie
+      .replace(/;\\s*Domain=[^;]+/gi, "")
+      .replace(/;\\s*Path=[^;]+/gi, "; Path=/")
+  );
+
+  res.setHeader("set-cookie", cookies);
+}
+
 function copyResponseHeadersFromNode(source, res) {
   const skip = new Set([
     "content-length",
@@ -337,6 +354,7 @@ app.all("/proxy", async (req, res) => {
     const contentType = String(upstream.headers["content-type"] || "");
     res.status(upstream.statusCode || 502);
     copyResponseHeadersFromNode(upstream.headers, res);
+    setProxySafeCookies(upstream.headers, res);
 
     if (contentType.includes("text/html")) {
       const chunks = [];
