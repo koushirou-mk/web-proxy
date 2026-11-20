@@ -145,7 +145,7 @@ function rewriteHtml(html, target) {
     try {
       const raw = typeof value === "string" ? value : value?.url;
       if (!raw) return value;
-      const u = new URL(raw, location.href);
+      const u = new URL(raw, origin + "/");
       if (u.origin !== origin) return value;
       if (u.pathname.startsWith("/proxy")) return value;
       const proxied = prefix + encodeURIComponent(u.href);
