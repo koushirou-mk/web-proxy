@@ -1,6 +1,8 @@
 import express from "express";
 import dns from "node:dns/promises";
 import dnsSync from "node:dns";
+import http from "node:http";
+import https from "node:https";
 
 dnsSync.setDefaultResultOrder("ipv4first");
 import net from "node:net";
@@ -142,6 +144,39 @@ function rewriteLocation(location, target) {
   }
 }
 
+function requestUpstream(url, headers) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const client = target.protocol === "https:" ? https : http;
+
+    const request = client.request(target, {
+      method: "GET",
+      headers,
+      maxHeaderSize: 128 * 1024,
+      timeout: 30000
+    }, resolve);
+
+    request.on("timeout", () => request.destroy(new Error("Upstream request timed out")));
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+function copyResponseHeadersFromNode(source, res) {
+  const skip = new Set([
+    "content-length",
+    "connection",
+    "keep-alive",
+    "transfer-encoding"
+  ]);
+
+  for (const [key, value] of Object.entries(source)) {
+    if (!skip.has(key.toLowerCase()) && value !== undefined) {
+      res.setHeader(key, value);
+    }
+  }
+}
+
 function copyResponseHeaders(source, res) {
   const skip = new Set([
     "content-length",
@@ -180,36 +215,39 @@ app.get("/proxy", async (req, res) => {
     if (req.get("range")) headers.range = req.get("range");
     if (req.get("referer")) headers.referer = req.get("referer");
 
-    const upstream = await fetch(target.href, {
-      method: "GET",
-      headers,
-      redirect: "manual"
+    const upstream = await requestUpstream(target.href, {
+      "user-agent": req.get("user-agent") || "Mozilla/5.0",
+      "accept": req.get("accept") || "*/*",
+      "accept-language": req.get("accept-language") || "ja,en;q=0.8",
+      ...(req.get("range") ? { range: req.get("range") } : {}),
+      ...(req.get("referer") ? { referer: req.get("referer") } : {})
     });
 
-    if (upstream.status >= 300 && upstream.status < 400) {
-      const location = upstream.headers.get("location");
+    if (upstream.statusCode >= 300 && upstream.statusCode < 400) {
+      const location = upstream.headers.location;
       if (location) {
-        res.status(upstream.status);
-        copyResponseHeaders(upstream.headers, res);
+        res.status(upstream.statusCode);
+        copyResponseHeadersFromNode(upstream.headers, res);
         res.setHeader("location", rewriteLocation(location, target.href));
+        upstream.resume();
         return res.end();
       }
     }
 
-    const contentType = upstream.headers.get("content-type") || "";
-    res.status(upstream.status);
-    copyResponseHeaders(upstream.headers, res);
+    const contentType = String(upstream.headers["content-type"] || "");
+    res.status(upstream.statusCode || 502);
+    copyResponseHeadersFromNode(upstream.headers, res);
 
     if (contentType.includes("text/html")) {
-      const html = await upstream.text();
+      const chunks = [];
+      for await (const chunk of upstream) chunks.push(Buffer.from(chunk));
+      const html = Buffer.concat(chunks).toString("utf8");
       res.removeHeader("content-length");
       res.removeHeader("content-encoding");
       return res.send(rewriteHtml(html, target.href));
     }
 
-    if (!upstream.body) return res.end();
-
-    return Readable.fromWeb(upstream.body).pipe(res);
+    return upstream.pipe(res);
   } catch (error) {
     console.error("Proxy error:", error, error?.cause || "");
     const detail = error?.cause?.code || error?.cause?.message || error?.code || error?.message || "unknown";
