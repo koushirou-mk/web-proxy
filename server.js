@@ -242,8 +242,8 @@ function rewriteHtml(html, target) {
 </script>`;
 
   // Put the shim before site scripts so API calls are intercepted early.
-  if (/<head\\b[^>]*>/i.test(html)) {
-    html = html.replace(/(<head\\b[^>]*>)/i, "$1" + shim);
+  if (/<head\b[^>]*>/i.test(html)) {
+    html = html.replace(/(<head\b[^>]*>)/i, "$1" + shim);
   } else {
     html = shim + html;
   }
@@ -419,6 +419,7 @@ app.all("/yt-api", async (req, res) => {
 
 app.all("/proxy", async (req, res) => {
   const rawUrl = typeof req.query.url === "string" ? req.query.url : "";
+  console.log("[proxy]", req.method, rawUrl.slice(0, 240));
 
   if (!rawUrl) {
     return res.status(400).send("Missing url");
