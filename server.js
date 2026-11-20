@@ -362,8 +362,12 @@ app.all("/yt-api", async (req, res) => {
     // InnerTube expects the request to look like a first-party YouTube
     // request. Keep YouTube's client headers/cookies/body from Safari while
     // replacing only the network destination.
-    incomingHeaders.origin = target.origin;
-    incomingHeaders.referer = target.origin + "/";
+    // InnerTube API requests are initiated by the YouTube web client.
+    // Even when the network host is youtubei.googleapis.com, the browser
+    // origin/referer must remain the YouTube website origin.
+    incomingHeaders.origin = "https://www.youtube.com";
+    incomingHeaders.referer = "https://www.youtube.com/";
+    incomingHeaders["x-origin"] = "https://www.youtube.com";
     incomingHeaders["accept-encoding"] = "identity";
 
     const upstream = await requestUpstream(
@@ -371,6 +375,15 @@ app.all("/yt-api", async (req, res) => {
       req.method,
       incomingHeaders,
       req
+    );
+
+    console.log(
+      "[yt-api]",
+      req.method,
+      target.hostname + target.pathname,
+      "=>",
+      upstream.statusCode,
+      upstream.headers["content-type"] || "no-content-type"
     );
 
     if (upstream.statusCode >= 300 && upstream.statusCode < 400) {
