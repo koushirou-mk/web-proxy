@@ -1,5 +1,7 @@
 import express from "express";
-import { createProxyMiddleware, responseInterceptor } from "http-proxy-middleware";
+import dns from "node:dns/promises";
+import net from "node:net";
+import { Readable } from "node:stream";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,6 +13,55 @@ app.get("/health", (_req, res) => {
 });
 
 app.use(express.static("public"));
+
+function isPrivateIp(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
+  }
+
+  if (net.isIPv6(ip)) {
+    const normalized = ip.toLowerCase();
+    return normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:");
+  }
+
+  return false;
+}
+
+async function validateTarget(rawUrl) {
+  const target = new URL(rawUrl);
+
+  if (!["http:", "https:"].includes(target.protocol)) {
+    throw new Error("Unsupported protocol");
+  }
+
+  if (target.username || target.password) {
+    throw new Error("Credentials in URL are not allowed");
+  }
+
+  const hostname = target.hostname.toLowerCase();
+
+  if (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local")
+  ) {
+    throw new Error("Private host is not allowed");
+  }
+
+  const addresses = await dns.lookup(hostname, { all: true });
+  if (addresses.some(({ address }) => isPrivateIp(address))) {
+    throw new Error("Private host is not allowed");
+  }
+
+  return target;
+}
 
 function proxyUrl(target, base) {
   try {
@@ -26,7 +77,16 @@ function rewriteHtml(html, target) {
   const base = new URL(target);
 
   html = html.replace(
-    /(<(?:img|script|iframe|video|audio|source|track|input|embed|object|link)[^>]+\s(?:src|href|poster|data)=["'])([^"']+)(["'])/gi,
+    /(<(?:img|script|iframe|video|audio|source|track|input|embed|object)[^>]+\s(?:src|poster|data)=["'])([^"']+)(["'])/gi,
+    (full, prefix, value, suffix) => {
+      if (/^(data:|blob:|javascript:|mailto:|tel:|#)/i.test(value)) return full;
+      const rewritten = proxyUrl(value, base);
+      return rewritten ? prefix + rewritten + suffix : full;
+    }
+  );
+
+  html = html.replace(
+    /(<link[^>]+\shref=["'])([^"']+)(["'])/gi,
     (full, prefix, value, suffix) => {
       if (/^(data:|blob:|javascript:|mailto:|tel:|#)/i.test(value)) return full;
       const rewritten = proxyUrl(value, base);
@@ -51,25 +111,17 @@ function rewriteHtml(html, target) {
         .map((item) => {
           const parts = item.trim().split(/\s+/);
           const url = proxyUrl(parts[0], base);
-          if (!url) return item;
-          return [url, ...parts.slice(1)].join(" ");
+          return url ? [url, ...parts.slice(1)].join(" ") : item;
         })
         .join(", ");
       return prefix + rewritten + suffix;
     }
   );
 
-  // CSS url(...) inside inline styles.
   html = html.replace(
     /url\((["']?)([^)"']+)\1\)/gi,
     (full, quote, value) => {
-      if (/^(data:|blob:|https?:\/\/|\/\/)/i.test(value)) {
-        if (/^https?:\/\//i.test(value)) {
-          const rewritten = proxyUrl(value, base);
-          return rewritten ? "url(" + quote + rewritten + quote + ")" : full;
-        }
-        return full;
-      }
+      if (/^(data:|blob:|javascript:)/i.test(value)) return full;
       const rewritten = proxyUrl(value, base);
       return rewritten ? "url(" + quote + rewritten + quote + ")" : full;
     }
@@ -78,7 +130,7 @@ function rewriteHtml(html, target) {
   return html;
 }
 
-function rewriteLocationHeader(location, target) {
+function rewriteLocation(location, target) {
   try {
     const absolute = new URL(location, target).href;
     return "/proxy?url=" + encodeURIComponent(absolute);
@@ -87,78 +139,79 @@ function rewriteLocationHeader(location, target) {
   }
 }
 
-app.use(
-  "/proxy",
-  createProxyMiddleware({
-    changeOrigin: true,
-    ws: true,
-    selfHandleResponse: true,
+function copyResponseHeaders(source, res) {
+  const skip = new Set([
+    "content-length",
+    "content-encoding",
+    "transfer-encoding",
+    "connection",
+    "keep-alive"
+  ]);
 
-    router: (req) => {
-      const target = req.query.url;
-      if (!target) return "http://example.com";
+  for (const [key, value] of source.entries()) {
+    if (!skip.has(key.toLowerCase())) res.setHeader(key, value);
+  }
+}
 
-      try {
-        const parsed = new URL(target);
-        if (!["http:", "https:"].includes(parsed.protocol)) {
-          throw new Error("Unsupported protocol");
-        }
-        return parsed.origin;
-      } catch {
-        return "http://example.com";
+app.get("/proxy", async (req, res) => {
+  const rawUrl = typeof req.query.url === "string" ? req.query.url : "";
+
+  if (!rawUrl) {
+    return res.status(400).send("Missing url");
+  }
+
+  let target;
+  try {
+    target = await validateTarget(rawUrl);
+  } catch (error) {
+    return res.status(400).send("Invalid target: " + error.message);
+  }
+
+  try {
+    const headers = {
+      "user-agent": req.get("user-agent") || "Mozilla/5.0",
+      "accept": req.get("accept") || "*/*",
+      "accept-language": req.get("accept-language") || "ja,en;q=0.8"
+    };
+
+    if (req.get("range")) headers.range = req.get("range");
+    if (req.get("referer")) headers.referer = req.get("referer");
+
+    const upstream = await fetch(target.href, {
+      method: "GET",
+      headers,
+      redirect: "manual"
+    });
+
+    if (upstream.status >= 300 && upstream.status < 400) {
+      const location = upstream.headers.get("location");
+      if (location) {
+        res.status(upstream.status);
+        copyResponseHeaders(upstream.headers, res);
+        res.setHeader("location", rewriteLocation(location, target.href));
+        return res.end();
       }
-    },
-
-    pathRewrite: (path, req) => {
-      const target = req.query.url;
-      if (!target) return "/";
-
-      try {
-        const u = new URL(target);
-        return u.pathname + u.search;
-      } catch {
-        return "/";
-      }
-    },
-
-    on: {
-      proxyReq(proxyReq, req) {
-        const target = req.query.url;
-        if (target) {
-          try {
-            const u = new URL(target);
-            proxyReq.setHeader("host", u.host);
-            proxyReq.setHeader("referer", u.origin + "/");
-          } catch {}
-        }
-      },
-
-      proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
-        const target = req.query.url;
-
-        if (proxyRes.headers.location && target) {
-          proxyRes.headers.location = rewriteLocationHeader(
-            proxyRes.headers.location,
-            target
-          );
-        }
-
-        const contentType = String(proxyRes.headers["content-type"] || "");
-
-        if (!target || !contentType.includes("text/html")) {
-          return responseBuffer;
-        }
-
-        try {
-          const html = responseBuffer.toString("utf8");
-          return rewriteHtml(html, target);
-        } catch {
-          return responseBuffer;
-        }
-      })
     }
-  })
-);
+
+    const contentType = upstream.headers.get("content-type") || "";
+    res.status(upstream.status);
+    copyResponseHeaders(upstream.headers, res);
+
+    if (contentType.includes("text/html")) {
+      const html = await upstream.text();
+      res.removeHeader("content-length");
+      res.removeHeader("content-encoding");
+      return res.send(rewriteHtml(html, target.href));
+    }
+
+    if (!upstream.body) return res.end();
+
+    return Readable.fromWeb(upstream.body).pipe(res);
+  } catch (error) {
+    console.error("Proxy error:", error);
+    return res.status(502).send("Error occurred while trying to proxy: " + error.message);
+  }
+});
 
 app.use((err, _req, res, _next) => {
   console.error(err);
@@ -166,5 +219,5 @@ app.use((err, _req, res, _next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`web-proxy listening on ${PORT}`);
+  console.log("web-proxy listening on " + PORT);
 });
