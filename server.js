@@ -71,6 +71,21 @@ function proxyUrl(target, base) {
   try {
     const u = new URL(target, base);
     if (!["http:", "https:"].includes(u.protocol)) return null;
+
+    // YouTube's InnerTube API is POST-based. Give it a dedicated same-origin
+    // relay so the browser can send the original request body and the proxy
+    // can forward the YouTube-specific headers/cookies without depending on
+    // URL rewriting inside the site's JavaScript.
+    const isYouTubeApi =
+      (u.hostname === "www.youtube.com" ||
+        u.hostname === "youtubei.googleapis.com" ||
+        u.hostname === "music.youtube.com") &&
+      u.pathname.startsWith("/youtubei/");
+
+    if (isYouTubeApi) {
+      return "/yt-api?url=" + encodeURIComponent(u.href);
+    }
+
     return "/proxy?url=" + encodeURIComponent(u.href);
   } catch {
     return null;
@@ -136,6 +151,7 @@ function rewriteHtml(html, target) {
   // otherwise bypass this proxy. Install a small early shim that routes
   // fetch/XHR/WebSocket/navigation URLs back through /proxy.
   const proxyPrefix = "/proxy?url=";
+  const youtubeApiPrefix = "/yt-api?url=";
   const shim = `<script>
 (() => {
   const prefix = ${JSON.stringify(proxyPrefix)};
@@ -149,10 +165,16 @@ function rewriteHtml(html, target) {
       if (!["http:", "https:"].includes(u.protocol)) return value;
       if (u.pathname.startsWith("/proxy") && u.origin === location.origin) return value;
 
-      // Modern sites such as YouTube call APIs on different origins
-      // (e.g. youtubei.googleapis.com). Those requests must also stay inside
-      // the proxy or Safari will see a mixed/offline app.
-      const proxied = prefix + encodeURIComponent(u.href);
+      // Modern sites such as YouTube call the InnerTube API with POST.
+      // Route those calls through a dedicated relay instead of the generic
+      // page proxy. This preserves the request body and YouTube API headers.
+      const isYouTubeApi =
+        (u.hostname === "www.youtube.com" ||
+          u.hostname === "youtubei.googleapis.com" ||
+          u.hostname === "music.youtube.com") &&
+        u.pathname.startsWith("/youtubei/");
+
+      const proxied = (isYouTubeApi ? youtubeApiPrefix : prefix) + encodeURIComponent(u.href);
       if (typeof value === "string") return proxied;
       return new Request(proxied, value);
     } catch {
@@ -306,6 +328,81 @@ function copyResponseHeaders(source, res) {
     if (!skip.has(key.toLowerCase())) res.setHeader(key, value);
   }
 }
+
+app.all("/yt-api", async (req, res) => {
+  const rawUrl = typeof req.query.url === "string" ? req.query.url : "";
+
+  if (!rawUrl) {
+    return res.status(400).send("Missing url");
+  }
+
+  let target;
+  try {
+    target = await validateTarget(rawUrl);
+
+    const allowedHost = new Set([
+      "www.youtube.com",
+      "youtubei.googleapis.com",
+      "music.youtube.com"
+    ]);
+
+    if (!allowedHost.has(target.hostname.toLowerCase()) ||
+        !target.pathname.startsWith("/youtubei/")) {
+      throw new Error("YouTube API host is not allowed");
+    }
+  } catch (error) {
+    return res.status(400).send("Invalid YouTube API target: " + error.message);
+  }
+
+  try {
+    const incomingHeaders = { ...req.headers };
+    delete incomingHeaders.host;
+    delete incomingHeaders.connection;
+
+    // InnerTube expects the request to look like a first-party YouTube
+    // request. Keep YouTube's client headers/cookies/body from Safari while
+    // replacing only the network destination.
+    incomingHeaders.origin = target.origin;
+    incomingHeaders.referer = target.origin + "/";
+    incomingHeaders["accept-encoding"] = "identity";
+
+    const upstream = await requestUpstream(
+      target.href,
+      req.method,
+      incomingHeaders,
+      req
+    );
+
+    if (upstream.statusCode >= 300 && upstream.statusCode < 400) {
+      const location = upstream.headers.location;
+      if (location) {
+        res.status(upstream.statusCode);
+        copyResponseHeadersFromNode(upstream.headers, res);
+        res.setHeader("location", rewriteLocation(location, target.href));
+        upstream.resume();
+        return res.end();
+      }
+    }
+
+    res.status(upstream.statusCode || 502);
+    copyResponseHeadersFromNode(upstream.headers, res);
+    setProxySafeCookies(upstream.headers, res);
+
+    // The API response is intentionally streamed untouched. YouTube's
+    // client expects its original JSON structure and response headers.
+    return upstream.pipe(res);
+  } catch (error) {
+    console.error("YouTube API proxy error:", error, error?.cause || "");
+    const detail =
+      error?.cause?.code ||
+      error?.cause?.message ||
+      error?.code ||
+      error?.message ||
+      "unknown";
+
+    return res.status(502).send("YouTube API proxy error: " + detail);
+  }
+});
 
 app.all("/proxy", async (req, res) => {
   const rawUrl = typeof req.query.url === "string" ? req.query.url : "";
