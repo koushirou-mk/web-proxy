@@ -315,6 +315,49 @@ function copyResponseHeadersFromNode(source, res) {
   }
 }
 
+async function proxyYouTubePath(req, res, targetUrl) {
+  try {
+    const incomingHeaders = { ...req.headers };
+    delete incomingHeaders.host;
+    delete incomingHeaders.connection;
+
+    incomingHeaders.origin = "https://www.youtube.com";
+    incomingHeaders.referer = "https://www.youtube.com/";
+    incomingHeaders["x-origin"] = "https://www.youtube.com";
+    incomingHeaders["accept-encoding"] = "identity";
+
+    const upstream = await requestUpstream(
+      targetUrl,
+      req.method,
+      incomingHeaders,
+      req
+    );
+
+    console.log(
+      "[yt-path]",
+      req.method,
+      new URL(targetUrl).pathname,
+      "=>",
+      upstream.statusCode,
+      upstream.headers["content-type"] || "no-content-type"
+    );
+
+    res.status(upstream.statusCode || 502);
+    copyResponseHeadersFromNode(upstream.headers, res);
+    setProxySafeCookies(upstream.headers, res);
+    return upstream.pipe(res);
+  } catch (error) {
+    console.error("YouTube path proxy error:", error, error?.cause || "");
+    const detail =
+      error?.cause?.code ||
+      error?.cause?.message ||
+      error?.code ||
+      error?.message ||
+      "unknown";
+    return res.status(502).send("YouTube path proxy error: " + detail);
+  }
+}
+
 function copyResponseHeaders(source, res) {
   const skip = new Set([
     "content-length",
@@ -328,6 +371,18 @@ function copyResponseHeaders(source, res) {
     if (!skip.has(key.toLowerCase())) res.setHeader(key, value);
   }
 }
+
+app.all(/^\\/youtubei\\/(?:.*)$/i, async (req, res) => {
+  const path = req.path;
+  if (!path.startsWith("/youtubei/")) {
+    return res.status(400).send("Invalid YouTube API path");
+  }
+
+  const query = new URLSearchParams(req.query).toString();
+  const target = "https://www.youtube.com" + path + (query ? "?" + query : "");
+
+  return proxyYouTubePath(req, res, target);
+});
 
 app.all("/yt-api", async (req, res) => {
   const rawUrl = typeof req.query.url === "string" ? req.query.url : "";
