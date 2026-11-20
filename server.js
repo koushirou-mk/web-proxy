@@ -81,7 +81,7 @@ function rewriteHtml(html, target) {
   const base = new URL(target);
 
   html = html.replace(
-    /(<(?:img|script|iframe|video|audio|source|track|input|embed|object)[^>]+\\s(?:src|poster|data)=["'])([^"']+)(["'])/gi,
+    /(<(?:img|script|iframe|video|audio|source|track|input|embed|object)[^>]+\s(?:src|poster|data)=["'])([^"']+)(["'])/gi,
     (full, prefix, value, suffix) => {
       if (/^(data:|blob:|javascript:|mailto:|tel:|#)/i.test(value)) return full;
       const rewritten = proxyUrl(value, base);
@@ -90,7 +90,7 @@ function rewriteHtml(html, target) {
   );
 
   html = html.replace(
-    /(<link[^>]+\\shref=["'])([^"']+)(["'])/gi,
+    /(<link[^>]+\shref=["'])([^"']+)(["'])/gi,
     (full, prefix, value, suffix) => {
       if (/^(data:|blob:|javascript:|mailto:|tel:|#)/i.test(value)) return full;
       const rewritten = proxyUrl(value, base);
@@ -99,7 +99,7 @@ function rewriteHtml(html, target) {
   );
 
   html = html.replace(
-    /(<(?:a|form)[^>]+\\s(?:href|action)=["'])([^"']+)(["'])/gi,
+    /(<(?:a|form)[^>]+\s(?:href|action)=["'])([^"']+)(["'])/gi,
     (full, prefix, value, suffix) => {
       if (/^(javascript:|mailto:|tel:|#)/i.test(value)) return full;
       const rewritten = proxyUrl(value, base);
@@ -108,12 +108,12 @@ function rewriteHtml(html, target) {
   );
 
   html = html.replace(
-    /(<[^>]+\\ssrcset=["'])([^"']+)(["'])/gi,
+    /(<[^>]+\ssrcset=["'])([^"']+)(["'])/gi,
     (full, prefix, value, suffix) => {
       const rewritten = value
         .split(",")
         .map((item) => {
-          const parts = item.trim().split(/\\s+/);
+          const parts = item.trim().split(/\s+/);
           const url = proxyUrl(parts[0], base);
           return url ? [url, ...parts.slice(1)].join(" ") : item;
         })
@@ -123,7 +123,7 @@ function rewriteHtml(html, target) {
   );
 
   html = html.replace(
-    /url\\((["']?)([^)"']+)\\1\\)/gi,
+    /url\((["']?)([^)"']+)\1\)/gi,
     (full, quote, value) => {
       if (/^(data:|blob:|javascript:)/i.test(value)) return full;
       const rewritten = proxyUrl(value, base);
