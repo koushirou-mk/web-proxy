@@ -172,6 +172,46 @@ function rewriteHtml(html, target) {
     return new originalWebSocket(proxied, protocols);
   };
   window.WebSocket.prototype = originalWebSocket.prototype;
+
+  // SPA navigation/forms can otherwise escape the proxy even though fetch/XHR
+  // requests are intercepted. Catch same-origin navigations as well.
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    const rawAction = form.getAttribute("action") || location.href;
+    try {
+      const u = new URL(rawAction, origin + "/");
+      if (u.origin !== origin) return;
+      event.preventDefault();
+
+      const data = new FormData(form);
+      const method = (form.method || "get").toLowerCase();
+
+      if (method === "get") {
+        for (const [key, value] of data.entries()) {
+          if (typeof value === "string") {
+            u.searchParams.set(key, value);
+          }
+        }
+        location.href = prefix + encodeURIComponent(u.href);
+      }
+    } catch {}
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    const anchor = event.target?.closest?.("a[href]");
+    if (!anchor) return;
+    if (event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+    try {
+      const u = new URL(anchor.getAttribute("href"), origin + "/");
+      if (u.origin !== origin) return;
+      if (u.pathname.startsWith("/proxy")) return;
+      event.preventDefault();
+      location.href = prefix + encodeURIComponent(u.href);
+    } catch {}
+  }, true);
 })();
 </script>`;
 
