@@ -1,5 +1,8 @@
 import express from "express";
 import dns from "node:dns/promises";
+import dnsSync from "node:dns";
+
+dnsSync.setDefaultResultOrder("ipv4first");
 import net from "node:net";
 import { Readable } from "node:stream";
 
@@ -208,8 +211,9 @@ app.get("/proxy", async (req, res) => {
 
     return Readable.fromWeb(upstream.body).pipe(res);
   } catch (error) {
-    console.error("Proxy error:", error);
-    return res.status(502).send("Error occurred while trying to proxy: " + error.message);
+    console.error("Proxy error:", error, error?.cause || "");
+    const detail = error?.cause?.code || error?.cause?.message || error?.code || error?.message || "unknown";
+    return res.status(502).send("Error occurred while trying to proxy: " + detail);
   }
 });
 
