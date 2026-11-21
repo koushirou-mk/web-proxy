@@ -16,6 +16,13 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "web-proxy" });
 });
 
+// YouTube uses this lightweight endpoint as an online/offline connectivity check.
+// Return a clean 204 from the proxy origin so the check itself cannot fail because
+// the browser is unable to reach YouTube directly.
+app.all("/youtube-generate-204", (_req, res) => {
+  res.status(204).end();
+});
+
 app.use(express.static("public"));
 
 app.get("/sw.js", (_req, res) => {
