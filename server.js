@@ -311,8 +311,23 @@ function rewriteHtml(html, target) {
     if (!(form instanceof HTMLFormElement)) return;
     const rawAction = form.getAttribute("action") || location.href;
     try {
-      const u = new URL(rawAction, origin + "/");
-      if (u.origin !== origin) return;
+      const actionUrl = new URL(rawAction, origin + "/");
+      let u = actionUrl;
+
+      // rewriteHtml() rewrites YouTube's form action to /proxy?url=... .
+      // In that case the search query must be merged into the embedded
+      // upstream URL, not appended to the outer /proxy URL. Otherwise the
+      // proxy receives /proxy?url=https://www.youtube.com/results with
+      // search_query sitting outside the encoded target, so /results is never
+      // requested upstream.
+      if (actionUrl.origin === location.origin && actionUrl.pathname === "/proxy") {
+        const embedded = actionUrl.searchParams.get("url");
+        if (!embedded) return;
+        u = new URL(embedded);
+      } else if (actionUrl.origin !== origin) {
+        return;
+      }
+
       event.preventDefault();
 
       const data = new FormData(form);
