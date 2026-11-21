@@ -701,6 +701,37 @@ app.all("/yt-api", async (req, res) => {
   }
 });
 
+app.all("/results", (req, res) => {
+  const searchQuery = typeof req.query.search_query === "string"
+    ? req.query.search_query
+    : "";
+
+  // If YouTube's SPA navigation escapes the client shim and lands on the
+  // proxy origin as /results, recover it server-side instead of returning
+  // Express's default "Cannot GET /results".
+  if (searchQuery) {
+    const target = new URL("https://www.youtube.com/results");
+    target.searchParams.set("search_query", searchQuery);
+
+    const extra = new URLSearchParams();
+    for (const [key, value] of Object.entries(req.query)) {
+      if (key === "search_query" || typeof value !== "string") continue;
+      extra.set(key, value);
+    }
+
+    const query = extra.toString();
+    if (query) {
+      for (const [key, value] of extra.entries()) {
+        target.searchParams.set(key, value);
+      }
+    }
+
+    return res.redirect("/proxy?url=" + encodeURIComponent(target.href));
+  }
+
+  return res.status(404).send("Not found");
+});
+
 app.all("/proxy", async (req, res) => {
   const rawUrl = typeof req.query.url === "string" ? req.query.url : "";
   console.log("[proxy]", req.method, rawUrl.slice(0, 240));
