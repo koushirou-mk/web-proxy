@@ -349,7 +349,7 @@ function rewriteHtml(html, target) {
   // YouTube handles the event and navigate directly to the proxied /results URL.
   const findSearchInput = (root) => {
     if (!root) return null;
-    const direct = root.querySelector?.("#search, input[name="search_query"]");
+    const direct = root.querySelector?.('#search, input[name="search_query"]');
     if (direct) return direct;
 
     for (const element of root.querySelectorAll?.("*") || []) {
@@ -425,7 +425,7 @@ function rewriteHtml(html, target) {
       (node) =>
         node?.matches?.(
           "#search-icon-legacy, ytd-searchbox, ytm-searchbox, yt-searchbox, " +
-          "button[aria-label*="Search"], button[aria-label*="検索"]"
+          'button[aria-label*="Search"], button[aria-label*="検索"]'
         )
     );
 
