@@ -347,10 +347,23 @@ function rewriteHtml(html, target) {
   // YouTube's search UI is a custom button, so it may never submit the
   // rewritten HTML form. Capture Enter on the actual search input before
   // YouTube handles the event and navigate directly to the proxied /results URL.
+  const findSearchInput = (root) => {
+    if (!root) return null;
+    const direct = root.querySelector?.("#search, input[name="search_query"]");
+    if (direct) return direct;
+
+    for (const element of root.querySelectorAll?.("*") || []) {
+      if (element.shadowRoot) {
+        const nested = findSearchInput(element.shadowRoot);
+        if (nested) return nested;
+      }
+    }
+    return null;
+  };
+
   const getSearchInput = (event) => {
-    // YouTube's search box can be inside an open Shadow DOM. In that case
-    // closest()/document.querySelector() may not see the real input, while
-    // composedPath() still exposes the event's path.
+    // Search events can cross a custom-element boundary. composedPath()
+    // identifies the real input even when document.querySelector() cannot.
     const path = typeof event?.composedPath === "function" ? event.composedPath() : [];
     const fromPath = path.find(
       (node) =>
@@ -367,7 +380,7 @@ function rewriteHtml(html, target) {
       return active;
     }
 
-    return document.querySelector("#search, input[name=\"search_query\"]");
+    return findSearchInput(document);
   };
 
   const navigateYouTubeSearch = (event) => {
@@ -390,23 +403,36 @@ function rewriteHtml(html, target) {
     if (event.defaultPrevented || event.key !== "Enter") return;
 
     const path = typeof event.composedPath === "function" ? event.composedPath() : [];
-    const input = getSearchInput(event);
-    const active = document.activeElement;
-    const inSearchBox =
-      !!input ||
-      path.some(
-        (node) =>
-          node?.matches?.("ytd-searchbox, ytm-searchbox, yt-searchbox")
-      ) ||
-      active?.closest?.("ytd-searchbox, ytm-searchbox, yt-searchbox");
+    const inSearchBox = path.some(
+      (node) =>
+        node instanceof HTMLInputElement &&
+        (node.matches("#search") || node.name === "search_query") ||
+        node?.matches?.("ytd-searchbox, ytm-searchbox, yt-searchbox")
+    );
 
     if (!inSearchBox) return;
     navigateYouTubeSearch(event);
   }, true);
 
-  // On iPad/desktop YouTube, tapping the search icon may submit the form
-  // without producing a keyboard Enter event. Capture the actual search
-  // control, including when it lives inside an open Shadow DOM.
+  // The iPad search control may be a custom element or a button inside a
+  // shadow root. Use the composed event path instead of relying on
+  // document.querySelector() for the button itself.
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0) return;
+
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const isSearchControl = path.some(
+      (node) =>
+        node?.matches?.(
+          "#search-icon-legacy, ytd-searchbox, ytm-searchbox, yt-searchbox, " +
+          "button[aria-label*="Search"], button[aria-label*="検索"]"
+        )
+    );
+
+    if (!isSearchControl) return;
+    navigateYouTubeSearch(event);
+  }, true);
+
   document.addEventListener("click", (event) => {
     if (event.defaultPrevented || event.button !== 0) return;
 
