@@ -270,6 +270,40 @@ function rewriteHtml(html, target) {
   };
   window.WebSocket.prototype = originalWebSocket.prototype;
 
+  // Some YouTube code runs network requests from dedicated workers or uses
+  // browser networking APIs that are not covered by fetch/XHR hooks. Route
+  // those URL-bearing entry points through the same proxy as well.
+  const originalWorker = window.Worker;
+  if (originalWorker) {
+    window.Worker = function(scriptURL, options) {
+      return new originalWorker(toProxy(scriptURL), options);
+    };
+    window.Worker.prototype = originalWorker.prototype;
+  }
+
+  const originalSharedWorker = window.SharedWorker;
+  if (originalSharedWorker) {
+    window.SharedWorker = function(scriptURL, options) {
+      return new originalSharedWorker(toProxy(scriptURL), options);
+    };
+    window.SharedWorker.prototype = originalSharedWorker.prototype;
+  }
+
+  const originalEventSource = window.EventSource;
+  if (originalEventSource) {
+    window.EventSource = function(url, options) {
+      return new originalEventSource(toProxy(url), options);
+    };
+    window.EventSource.prototype = originalEventSource.prototype;
+  }
+
+  const originalSendBeacon = navigator.sendBeacon?.bind(navigator);
+  if (originalSendBeacon) {
+    navigator.sendBeacon = function(url, data) {
+      return originalSendBeacon(toProxy(url), data);
+    };
+  }
+
   // SPA navigation/forms can otherwise escape the proxy even though fetch/XHR
   // requests are intercepted. Catch same-origin navigations as well.
   document.addEventListener("submit", (event) => {
