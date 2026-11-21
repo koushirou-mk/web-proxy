@@ -32,6 +32,13 @@ app.post("/youtube-debug", express.json({ limit: "2kb" }), (req, res) => {
 
 app.use(express.static("public"));
 
+// Explicit root route for Vercel's serverless Express runtime.
+// Keep the Render/local behavior unchanged while ensuring GET / is served
+// even when the static middleware is not resolved as the project root.
+app.get("/", (_req, res) => {
+  res.sendFile(new URL("./public/index.html", import.meta.url).pathname);
+});
+
 // Vercel's Express runtime should serve the proxy landing page explicitly.
 // Keep / as a normal Express route as well as the static index fallback.
 app.get("/", (_req, res) => {
@@ -834,6 +841,12 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: "Proxy error" });
 });
 
-app.listen(PORT, () => {
-  console.log("web-proxy listening on " + PORT);
-});
+// Render/local runs the Express listener normally. Vercel imports the app
+// as a serverless function instead of opening a long-lived listener.
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log("web-proxy listening on " + PORT);
+  });
+}
+
+export default app;
