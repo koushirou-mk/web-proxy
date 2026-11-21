@@ -349,8 +349,28 @@ function rewriteHtml(html, target) {
   // YouTube handles the event and navigate directly to the proxied /results URL.
   document.addEventListener("keydown", (event) => {
     if (event.defaultPrevented || event.key !== "Enter") return;
-    const input = event.target?.closest?.("#search, input[name=\"search_query\"]");
+
+    // YouTube's search box is wrapped in a custom element and can expose
+    // keyboard events with the host element as event.target. Do not rely only
+    // on target.closest("#search"); also inspect the actual search input and
+    // the currently focused element.
+    const directInput = event.target?.closest?.("#search, input[name=\"search_query\"]");
+    const activeInput = document.activeElement?.matches?.("#search, input[name=\"search_query\"]")
+      ? document.activeElement
+      : null;
+    const input = directInput || activeInput || document.querySelector("#search, input[name=\"search_query\"]");
+
     if (!input) return;
+
+    // Only hijack Enter when the search input (or its YouTube search-box host)
+    // is actually focused. This keeps Enter on other parts of the page intact.
+    const active = document.activeElement;
+    const activeIsSearchHost =
+      active === input ||
+      active?.closest?.("ytd-searchbox, ytm-searchbox, yt-searchbox") ||
+      event.target?.closest?.("ytd-searchbox, ytm-searchbox, yt-searchbox");
+
+    if (!activeIsSearchHost) return;
 
     const query = String(input.value || "").trim();
     if (!query) return;
