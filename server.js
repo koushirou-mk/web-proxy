@@ -426,20 +426,6 @@ function rewriteHtml(html, target) {
     location.href = prefix + encodeURIComponent(results.href);
     return true;
   };
-    const input = getSearchInput(event);
-    if (!input) return false;
-
-    const query = String(input.value || "").trim();
-    if (!query) return false;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    const results = new URL("https://www.youtube.com/results");
-    results.searchParams.set("search_query", query);
-    location.href = prefix + encodeURIComponent(results.href);
-    return true;
-  };
 
   document.addEventListener("keydown", (event) => {
     if (event.defaultPrevented || event.key !== "Enter") return;
