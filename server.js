@@ -540,6 +540,28 @@ function rewriteHtml(html, target) {
   return html;
 }
 
+function rewriteCss(css, target) {
+  const base = new URL(target);
+
+  // CSS assets are resolved relative to the stylesheet URL, not the HTML
+  // document. Rewrite url(...) inside CSS so images/fonts/imports continue
+  // through the proxy.
+  return css.replace(
+    /url\\((["']?)([^)"']+)\\1\\)/gi,
+    (full, quote, value) => {
+      if (/^(data:|blob:|javascript:|#)/i.test(value)) return full;
+      const rewritten = proxyUrl(value, base);
+      return rewritten ? "url(" + quote + rewritten + quote + ")" : full;
+    }
+  ).replace(
+    /@import\\s+(?:url\\()?([\"'])([^\"']+)\\1\\)?/gi,
+    (full, quote, value) => {
+      const rewritten = proxyUrl(value, base);
+      return rewritten ? full.replace(value, rewritten) : full;
+    }
+  );
+}
+
 function rewriteLocation(location, target) {
   try {
     const absolute = new URL(location, target).href;
@@ -813,19 +835,28 @@ app.all("/proxy", async (req, res) => {
     copyResponseHeadersFromNode(upstream.headers, res);
     setProxySafeCookies(upstream.headers, res);
 
-    if (contentType.includes("text/html")) {
+    if (contentType.includes("text/html") || contentType.includes("text/css")) {
       const chunks = [];
       for await (const chunk of upstream) chunks.push(Buffer.from(chunk));
-      const html = Buffer.concat(chunks).toString("utf8");
+      const body = Buffer.concat(chunks).toString("utf8");
 
       // These headers can prevent the injected proxy shim from running.
-      res.removeHeader("content-security-policy");
-      res.removeHeader("content-security-policy-report-only");
-      res.removeHeader("x-frame-options");
+      // CSS also needs to be decoded and rewritten because relative
+      // url(...) references are resolved from the stylesheet URL.
+      if (contentType.includes("text/html")) {
+        res.removeHeader("content-security-policy");
+        res.removeHeader("content-security-policy-report-only");
+        res.removeHeader("x-frame-options");
+      }
+
       res.removeHeader("content-length");
       res.removeHeader("content-encoding");
 
-      return res.send(rewriteHtml(html, target.href));
+      if (contentType.includes("text/css")) {
+        return res.send(rewriteCss(body, target.href));
+      }
+
+      return res.send(rewriteHtml(body, target.href));
     }
 
     return upstream.pipe(res);
