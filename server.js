@@ -18,6 +18,54 @@ app.get("/health", (_req, res) => {
 
 app.use(express.static("public"));
 
+app.get("/sw.js", (_req, res) => {
+  res.type("application/javascript").send(`self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  const url = new URL(request.url);
+
+  // Never intercept the proxy's own relay endpoints or the service worker itself.
+  if (url.pathname === "/proxy" || url.pathname === "/yt-api" || url.pathname === "/sw.js") {
+    return;
+  }
+
+  const clientPromise = request.clientId ? self.clients.get(request.clientId) : Promise.resolve(null);
+
+  event.respondWith((async () => {
+    const client = await clientPromise;
+    const clientUrl = client ? new URL(client.url) : null;
+
+    // The proxied YouTube page carries its real upstream URL in /proxy?url=...
+    // Use that origin as the base for relative API requests such as
+    // /youtubei/v1/search. This catches requests made outside window.fetch,
+    // including worker/service-worker initiated fetches.
+    if (clientUrl && clientUrl.pathname === "/proxy") {
+      const upstreamRaw = clientUrl.searchParams.get("url");
+      if (upstreamRaw) {
+        try {
+          const upstreamBase = new URL(upstreamRaw);
+          let target;
+
+          if (url.origin === self.location.origin) {
+            target = new URL(url.pathname + url.search, upstreamBase.origin);
+          } else if (url.protocol === "http:" || url.protocol === "https:") {
+            target = url;
+          }
+
+          if (target && !target.pathname.startsWith("/proxy") && !target.pathname.startsWith("/yt-api")) {
+            const relay = new URL("/proxy", self.location.origin);
+            relay.searchParams.set("url", target.href);
+
+            return fetch(new Request(relay.href, request));
+          }
+        } catch {}
+      }
+    }
+
+    return fetch(request);
+  })());
+});`);
+});
+
 function isPrivateIp(ip) {
   if (net.isIPv4(ip)) {
     const [a, b] = ip.split(".").map(Number);
@@ -246,6 +294,16 @@ function rewriteHtml(html, target) {
       location.href = prefix + encodeURIComponent(u.href);
     } catch {}
   }, true);
+})();
+</script>`;
+
+  // Register a same-origin service worker as a second interception layer.
+  // This catches requests initiated outside window.fetch/XHR as well.
+  const swShim = `<script>
+(() => {
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  }
 })();
 </script>`;
 
