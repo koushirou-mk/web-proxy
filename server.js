@@ -556,6 +556,15 @@ app.all("/proxy", async (req, res) => {
   }
 
   try {
+    // YouTube's connectivity check can arrive through the generic proxy,
+    // not /yt-api. Handle the image-host check here as well.
+    if (
+      target.hostname === "i.ytimg.com" &&
+      target.pathname === "/generate_204"
+    ) {
+      return res.status(204).end();
+    }
+
     const incomingHeaders = { ...req.headers };
     delete incomingHeaders.host;
     delete incomingHeaders.connection;
