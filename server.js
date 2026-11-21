@@ -705,7 +705,7 @@ app.all("/yt-api", async (req, res) => {
 // If that navigation reaches the proxy origin without the client shim rewriting it,
 // recover the upstream YouTube URL server-side instead of letting Express return
 // "Cannot GET /...".
-app.all(/^\\/(?:shorts|watch|channel|playlist|@[^/]+)(?:\\/|$)/, (req, res) => {
+app.all(/^\/(?:shorts|watch|channel|playlist|@[^/]+)(?:\/|$)/, (req, res) => {
   const target = new URL("https://www.youtube.com" + req.originalUrl);
   return res.redirect("/proxy?url=" + encodeURIComponent(target.href));
 });
