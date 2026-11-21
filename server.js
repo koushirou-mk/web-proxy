@@ -562,7 +562,7 @@ function rewriteCss(css, target) {
       return rewritten ? "url(" + quote + rewritten + quote + ")" : full;
     }
   ).replace(
-    /@import\\s+(?:url\\()?([\"'])([^\"']+)\\1\\)?/gi,
+    /@import\s+(?:url\()?([\"'])([^\"']+)\1\)?/gi,
     (full, quote, value) => {
       const rewritten = proxyUrl(decodeHtmlUrl(value), base);
       return rewritten ? full.replace(value, rewritten) : full;
