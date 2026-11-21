@@ -701,6 +701,15 @@ app.all("/yt-api", async (req, res) => {
   }
 });
 
+// YouTube uses normal browser navigation for video, Shorts, channels, playlists, etc.
+// If that navigation reaches the proxy origin without the client shim rewriting it,
+// recover the upstream YouTube URL server-side instead of letting Express return
+// "Cannot GET /...".
+app.all(/^\\/(?:shorts|watch|channel|playlist|@[^/]+)(?:\\/|$)/, (req, res) => {
+  const target = new URL("https://www.youtube.com" + req.originalUrl);
+  return res.redirect("/proxy?url=" + encodeURIComponent(target.href));
+});
+
 app.all("/results", (req, res) => {
   const searchQuery = typeof req.query.search_query === "string"
     ? req.query.search_query
