@@ -347,33 +347,35 @@ function rewriteHtml(html, target) {
   // YouTube's search UI is a custom button, so it may never submit the
   // rewritten HTML form. Capture Enter on the actual search input before
   // YouTube handles the event and navigate directly to the proxied /results URL.
-  document.addEventListener("keydown", (event) => {
-    if (event.defaultPrevented || event.key !== "Enter") return;
+  const getSearchInput = (event) => {
+    // YouTube's search box can be inside an open Shadow DOM. In that case
+    // closest()/document.querySelector() may not see the real input, while
+    // composedPath() still exposes the event's path.
+    const path = typeof event?.composedPath === "function" ? event.composedPath() : [];
+    const fromPath = path.find(
+      (node) =>
+        node instanceof HTMLInputElement &&
+        (node.matches("#search") || node.name === "search_query")
+    );
+    if (fromPath) return fromPath;
 
-    // YouTube's search box is wrapped in a custom element and can expose
-    // keyboard events with the host element as event.target. Do not rely only
-    // on target.closest("#search"); also inspect the actual search input and
-    // the currently focused element.
-    const directInput = event.target?.closest?.("#search, input[name=\"search_query\"]");
-    const activeInput = document.activeElement?.matches?.("#search, input[name=\"search_query\"]")
-      ? document.activeElement
-      : null;
-    const input = directInput || activeInput || document.querySelector("#search, input[name=\"search_query\"]");
-
-    if (!input) return;
-
-    // Only hijack Enter when the search input (or its YouTube search-box host)
-    // is actually focused. This keeps Enter on other parts of the page intact.
     const active = document.activeElement;
-    const activeIsSearchHost =
-      active === input ||
-      active?.closest?.("ytd-searchbox, ytm-searchbox, yt-searchbox") ||
-      event.target?.closest?.("ytd-searchbox, ytm-searchbox, yt-searchbox");
+    if (
+      active instanceof HTMLInputElement &&
+      (active.matches("#search") || active.name === "search_query")
+    ) {
+      return active;
+    }
 
-    if (!activeIsSearchHost) return;
+    return document.querySelector("#search, input[name="search_query"]");
+  };
+
+  const navigateYouTubeSearch = (event) => {
+    const input = getSearchInput(event);
+    if (!input) return false;
 
     const query = String(input.value || "").trim();
-    if (!query) return;
+    if (!query) return false;
 
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -381,6 +383,43 @@ function rewriteHtml(html, target) {
     const results = new URL("https://www.youtube.com/results");
     results.searchParams.set("search_query", query);
     location.href = prefix + encodeURIComponent(results.href);
+    return true;
+  };
+
+  document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || event.key !== "Enter") return;
+
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const input = getSearchInput(event);
+    const active = document.activeElement;
+    const inSearchBox =
+      !!input ||
+      path.some(
+        (node) =>
+          node?.matches?.("ytd-searchbox, ytm-searchbox, yt-searchbox")
+      ) ||
+      active?.closest?.("ytd-searchbox, ytm-searchbox, yt-searchbox");
+
+    if (!inSearchBox) return;
+    navigateYouTubeSearch(event);
+  }, true);
+
+  // On iPad/desktop YouTube, tapping the search icon may submit the form
+  // without producing a keyboard Enter event. Capture the actual search
+  // control, including when it lives inside an open Shadow DOM.
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0) return;
+
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const isSearchButton = path.some(
+      (node) =>
+        node?.matches?.(
+          "#search-icon-legacy, button[aria-label*="Search"], button[aria-label*="検索"]"
+        )
+    );
+
+    if (!isSearchButton) return;
+    navigateYouTubeSearch(event);
   }, true);
 
   document.addEventListener("click", (event) => {
