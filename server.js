@@ -51,7 +51,7 @@ app.get("/sw.js", (_req, res) => {
   const url = new URL(request.url);
 
   // Never intercept the proxy's own relay endpoints or the service worker itself.
-  if (url.pathname === "/proxy" || url.pathname === "/yt-api" || url.pathname === "/sw.js") {
+  if (url.pathname === "/proxy" || url.pathname === "/take" || url.pathname === "/yt-api" || url.pathname === "/sw.js") {
     return;
   }
 
@@ -65,7 +65,7 @@ app.get("/sw.js", (_req, res) => {
     // Use that origin as the base for relative API requests such as
     // /youtubei/v1/search. This catches requests made outside window.fetch,
     // including worker/service-worker initiated fetches.
-    if (clientUrl && clientUrl.pathname === "/proxy") {
+    if (clientUrl && (clientUrl.pathname === "/proxy" || clientUrl.pathname === "/take")) {
       const upstreamRaw = clientUrl.searchParams.get("url");
       if (upstreamRaw) {
         try {
@@ -82,8 +82,8 @@ app.get("/sw.js", (_req, res) => {
             return fetch(new Request(new URL("/youtube-generate-204", self.location.origin), request));
           }
 
-          if (target && !target.pathname.startsWith("/proxy") && !target.pathname.startsWith("/yt-api")) {
-            const relay = new URL("/proxy", self.location.origin);
+          if (target && !target.pathname.startsWith("/proxy") && !target.pathname.startsWith("/take") && !target.pathname.startsWith("/yt-api")) {
+            const relay = new URL("/take", self.location.origin);
             relay.searchParams.set("url", target.href);
 
             return fetch(new Request(relay.href, request));
@@ -165,7 +165,7 @@ function proxyUrl(target, base) {
       return "/yt-api?url=" + encodeURIComponent(u.href);
     }
 
-    return "/proxy?url=" + encodeURIComponent(u.href);
+    return "/take?url=" + encodeURIComponent(u.href);
   } catch {
     return null;
   }
@@ -237,7 +237,7 @@ function rewriteHtml(html, target) {
   // initial HTML loads. Those calls use relative or same-origin URLs and would
   // otherwise bypass this proxy. Install a small early shim that routes
   // fetch/XHR/WebSocket/navigation URLs back through /proxy.
-  const proxyPrefix = "/proxy?url=";
+  const proxyPrefix = "/take?url=";
   const youtubeApiPrefix = "/yt-api?url=";
   const shim = `<script>
 (() => {
@@ -250,7 +250,7 @@ function rewriteHtml(html, target) {
       if (!raw) return value;
       const u = new URL(raw, origin + "/");
       if (!["http:", "https:"].includes(u.protocol)) return value;
-      if (u.pathname.startsWith("/proxy") && u.origin === location.origin) return value;
+      if ((u.pathname.startsWith("/proxy") || u.pathname.startsWith("/take")) && u.origin === location.origin) return value;
 
       // Modern sites such as YouTube call the InnerTube API with POST.
       // Route those calls through a dedicated relay instead of the generic
@@ -348,7 +348,7 @@ function rewriteHtml(html, target) {
       // proxy receives /proxy?url=https://www.youtube.com/results with
       // search_query sitting outside the encoded target, so /results is never
       // requested upstream.
-      if (actionUrl.origin === location.origin && actionUrl.pathname === "/proxy") {
+      if (actionUrl.origin === location.origin && (actionUrl.pathname === "/proxy" || actionUrl.pathname === "/take")) {
         const embedded = actionUrl.searchParams.get("url");
         if (!embedded) return;
         u = new URL(embedded);
@@ -510,7 +510,7 @@ function rewriteHtml(html, target) {
     try {
       const u = new URL(anchor.getAttribute("href"), origin + "/");
       if (u.origin !== origin) return;
-      if (u.pathname.startsWith("/proxy")) return;
+      if ((u.pathname.startsWith("/proxy") || u.pathname.startsWith("/take"))) return;
       event.preventDefault();
       location.href = prefix + encodeURIComponent(u.href);
     } catch {}
@@ -573,7 +573,7 @@ function rewriteCss(css, target) {
 function rewriteLocation(location, target) {
   try {
     const absolute = new URL(location, target).href;
-    return "/proxy?url=" + encodeURIComponent(absolute);
+    return "/take?url=" + encodeURIComponent(absolute);
   } catch {
     return location;
   }
@@ -750,7 +750,7 @@ app.all("/yt-api", async (req, res) => {
 // "Cannot GET /...".
 app.all(/^\/(?:shorts|watch|channel|playlist|@[^/]+)(?:\/|$)/, (req, res) => {
   const target = new URL("https://www.youtube.com" + req.originalUrl);
-  return res.redirect("/proxy?url=" + encodeURIComponent(target.href));
+  return res.redirect("/take?url=" + encodeURIComponent(target.href));
 });
 
 app.all("/results", (req, res) => {
@@ -778,7 +778,7 @@ app.all("/results", (req, res) => {
       }
     }
 
-    return res.redirect("/proxy?url=" + encodeURIComponent(target.href));
+    return res.redirect("/take?url=" + encodeURIComponent(target.href));
   }
 
   return res.status(404).send("Not found");
