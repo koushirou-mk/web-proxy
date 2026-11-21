@@ -171,6 +171,14 @@ function proxyUrl(target, base) {
   }
 }
 
+function decodeHtmlUrl(value) {
+  // HTML URL attributes encode query separators as &amp;. Decode before URL parsing.
+  return String(value)
+    .replace(/&amp;/gi, "&")
+    .replace(/&#0*38;/gi, "&")
+    .replace(/&#x0*26;/gi, "&");
+}
+
 function rewriteHtml(html, target) {
   const base = new URL(target);
 
@@ -178,7 +186,7 @@ function rewriteHtml(html, target) {
     /(<(?:img|script|iframe|video|audio|source|track|input|embed|object)[^>]+\s(?:src|poster|data)=["'])([^"']+)(["'])/gi,
     (full, prefix, value, suffix) => {
       if (/^(data:|blob:|javascript:|mailto:|tel:|#)/i.test(value)) return full;
-      const rewritten = proxyUrl(value, base);
+      const rewritten = proxyUrl(decodeHtmlUrl(value), base);
       return rewritten ? prefix + rewritten + suffix : full;
     }
   );
@@ -187,7 +195,7 @@ function rewriteHtml(html, target) {
     /(<link[^>]+\shref=["'])([^"']+)(["'])/gi,
     (full, prefix, value, suffix) => {
       if (/^(data:|blob:|javascript:|mailto:|tel:|#)/i.test(value)) return full;
-      const rewritten = proxyUrl(value, base);
+      const rewritten = proxyUrl(decodeHtmlUrl(value), base);
       return rewritten ? prefix + rewritten + suffix : full;
     }
   );
@@ -196,7 +204,7 @@ function rewriteHtml(html, target) {
     /(<(?:a|form)[^>]+\s(?:href|action)=["'])([^"']+)(["'])/gi,
     (full, prefix, value, suffix) => {
       if (/^(javascript:|mailto:|tel:|#)/i.test(value)) return full;
-      const rewritten = proxyUrl(value, base);
+      const rewritten = proxyUrl(decodeHtmlUrl(value), base);
       return rewritten ? prefix + rewritten + suffix : full;
     }
   );
@@ -208,7 +216,7 @@ function rewriteHtml(html, target) {
         .split(",")
         .map((item) => {
           const parts = item.trim().split(/\s+/);
-          const url = proxyUrl(parts[0], base);
+          const url = proxyUrl(decodeHtmlUrl(parts[0]), base);
           return url ? [url, ...parts.slice(1)].join(" ") : item;
         })
         .join(", ");
@@ -220,7 +228,7 @@ function rewriteHtml(html, target) {
     /url\((["']?)([^)"']+)\1\)/gi,
     (full, quote, value) => {
       if (/^(data:|blob:|javascript:)/i.test(value)) return full;
-      const rewritten = proxyUrl(value, base);
+      const rewritten = proxyUrl(decodeHtmlUrl(value), base);
       return rewritten ? "url(" + quote + rewritten + quote + ")" : full;
     }
   );
@@ -550,13 +558,13 @@ function rewriteCss(css, target) {
     /url\\((["']?)([^)"']+)\\1\\)/gi,
     (full, quote, value) => {
       if (/^(data:|blob:|javascript:|#)/i.test(value)) return full;
-      const rewritten = proxyUrl(value, base);
+      const rewritten = proxyUrl(decodeHtmlUrl(value), base);
       return rewritten ? "url(" + quote + rewritten + quote + ")" : full;
     }
   ).replace(
     /@import\\s+(?:url\\()?([\"'])([^\"']+)\\1\\)?/gi,
     (full, quote, value) => {
-      const rewritten = proxyUrl(value, base);
+      const rewritten = proxyUrl(decodeHtmlUrl(value), base);
       return rewritten ? full.replace(value, rewritten) : full;
     }
   );
