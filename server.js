@@ -32,6 +32,12 @@ app.post("/youtube-debug", express.json({ limit: "2kb" }), (req, res) => {
 
 app.use(express.static("public"));
 
+// Vercel's Express runtime should serve the proxy landing page explicitly.
+// Keep / as a normal Express route as well as the static index fallback.
+app.get("/", (_req, res) => {
+  res.sendFile("index.html", { root: "public" });
+});
+
 app.get("/sw.js", (_req, res) => {
   res.type("application/javascript").send(`self.addEventListener("fetch", (event) => {
   const request = event.request;
