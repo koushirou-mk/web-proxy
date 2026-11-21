@@ -470,6 +470,13 @@ app.all("/yt-api", async (req, res) => {
   }
 
   try {
+    // YouTube's online check is requested through the generic /proxy relay too.
+    // Handle it here, before contacting YouTube, so a proxied HEAD request cannot
+    // make the YouTube client decide that it is offline.
+    if (target.hostname === "www.youtube.com" && target.pathname === "/generate_204") {
+      return res.status(204).end();
+    }
+
     const incomingHeaders = { ...req.headers };
     delete incomingHeaders.host;
     delete incomingHeaders.connection;
