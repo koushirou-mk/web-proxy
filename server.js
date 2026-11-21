@@ -784,7 +784,7 @@ app.all("/results", (req, res) => {
   return res.status(404).send("Not found");
 });
 
-app.all("/proxy", async (req, res) => {
+app.all(["/proxy", "/take"], async (req, res) => {
   const rawUrl = typeof req.query.url === "string" ? req.query.url : "";
   console.log("[proxy]", req.method, rawUrl.slice(0, 240));
 
