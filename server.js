@@ -521,11 +521,21 @@ function rewriteHtml(html, target) {
 })();
 </script>`;
 
-  // Put the shim before site scripts so API calls are intercepted early.
-  if (/<head\b[^>]*>/i.test(html)) {
-    html = html.replace(/(<head\b[^>]*>)/i, "$1" + shim);
-  } else {
-    html = shim + html;
+  // Keep the generic proxy generic: only inject the heavy client-side
+  // interception layer into YouTube pages. Ordinary sites get only the
+  // normal URL rewriting above.
+  const isYouTubePage =
+    base.hostname === "www.youtube.com" ||
+    base.hostname === "youtube.com" ||
+    base.hostname === "m.youtube.com";
+
+  if (isYouTubePage) {
+    // Put the shim before site scripts so YouTube API calls are intercepted early.
+    if (/<head\b[^>]*>/i.test(html)) {
+      html = html.replace(/(<head\b[^>]*>)/i, "$1" + shim);
+    } else {
+      html = shim + html;
+    }
   }
 
   return html;
