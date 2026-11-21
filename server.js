@@ -367,7 +367,7 @@ function rewriteHtml(html, target) {
       return active;
     }
 
-    return document.querySelector("#search, input[name="search_query"]");
+    return document.querySelector("#search, input[name=\"search_query\"]");
   };
 
   const navigateYouTubeSearch = (event) => {
@@ -414,7 +414,7 @@ function rewriteHtml(html, target) {
     const isSearchButton = path.some(
       (node) =>
         node?.matches?.(
-          "#search-icon-legacy, button[aria-label*="Search"], button[aria-label*="検索"]"
+          "#search-icon-legacy, button[aria-label*=\"Search\"], button[aria-label*=\"検索\"]"
         )
     );
 
