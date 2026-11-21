@@ -58,6 +58,10 @@ app.get("/sw.js", (_req, res) => {
             target = url;
           }
 
+          if (target && target.pathname === "/generate_204") {
+            return fetch(new Request(new URL("/youtube-generate-204", self.location.origin), request));
+          }
+
           if (target && !target.pathname.startsWith("/proxy") && !target.pathname.startsWith("/yt-api")) {
             const relay = new URL("/proxy", self.location.origin);
             relay.searchParams.set("url", target.href);
@@ -231,6 +235,10 @@ function rewriteHtml(html, target) {
 
       // YouTube search can navigate through a page-level URL rather than
       // window.fetch/XHR. Force the search endpoint itself through the proxy.
+      if (u.hostname === "www.youtube.com" && u.pathname === "/generate_204") {
+        return "/youtube-generate-204";
+      }
+
       if (u.hostname === "www.youtube.com" && u.pathname === "/results") {
         const searchUrl = prefix + encodeURIComponent(u.href);
         if (typeof value === "string") return searchUrl;
