@@ -23,6 +23,13 @@ app.all("/youtube-generate-204", (_req, res) => {
   res.status(204).end();
 });
 
+app.post("/youtube-debug", express.json({ limit: "2kb" }), (req, res) => {
+  const event = typeof req.body?.event === "string" ? req.body.event : "unknown";
+  const detail = req.body?.detail && typeof req.body.detail === "object" ? req.body.detail : {};
+  console.log("[yt-debug]", event, JSON.stringify(detail).slice(0, 1000));
+  res.status(204).end();
+});
+
 app.use(express.static("public"));
 
 app.get("/sw.js", (_req, res) => {
@@ -383,7 +390,42 @@ function rewriteHtml(html, target) {
     return findSearchInput(document);
   };
 
+  const originalSendBeaconForDebug = navigator.sendBeacon?.bind(navigator);
+  const youtubeDebug = (event, detail = {}) => {
+    try {
+      if (originalSendBeaconForDebug) {
+        originalSendBeaconForDebug("/youtube-debug", new Blob([
+          JSON.stringify({ event, detail })
+        ], { type: "application/json" }));
+      }
+    } catch {}
+  };
+
   const navigateYouTubeSearch = (event) => {
+    const input = getSearchInput(event);
+    youtubeDebug("navigate-attempt", {
+      inputFound: !!input,
+      tag: input?.tagName || null,
+      name: input?.name || null,
+      valueLength: input ? String(input.value || "").length : 0
+    });
+    if (!input) return false;
+
+    const query = String(input.value || "").trim();
+    if (!query) {
+      youtubeDebug("navigate-empty", {});
+      return false;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const results = new URL("https://www.youtube.com/results");
+    results.searchParams.set("search_query", query);
+    youtubeDebug("navigate", { valueLength: query.length });
+    location.href = prefix + encodeURIComponent(results.href);
+    return true;
+  };
     const input = getSearchInput(event);
     if (!input) return false;
 
@@ -401,6 +443,10 @@ function rewriteHtml(html, target) {
 
   document.addEventListener("keydown", (event) => {
     if (event.defaultPrevented || event.key !== "Enter") return;
+    youtubeDebug("keydown-enter", {
+      targetTag: event.target?.tagName || null,
+      targetName: event.target?.name || null
+    });
 
     const path = typeof event.composedPath === "function" ? event.composedPath() : [];
     const inSearchBox = path.some(
