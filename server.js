@@ -174,6 +174,14 @@ function rewriteHtml(html, target) {
           u.hostname === "music.youtube.com") &&
         u.pathname.startsWith("/youtubei/");
 
+      // YouTube search can navigate through a page-level URL rather than
+      // window.fetch/XHR. Force the search endpoint itself through the proxy.
+      if (u.hostname === "www.youtube.com" && u.pathname === "/results") {
+        const searchUrl = prefix + encodeURIComponent(u.href);
+        if (typeof value === "string") return searchUrl;
+        return new Request(searchUrl, value);
+      }
+
       const proxied = (isYouTubeApi ? youtubeApiPrefix : prefix) + encodeURIComponent(u.href);
       if (typeof value === "string") return proxied;
       return new Request(proxied, value);
