@@ -344,6 +344,25 @@ function rewriteHtml(html, target) {
     } catch {}
   }, true);
 
+  // YouTube's search UI is a custom button, so it may never submit the
+  // rewritten HTML form. Capture Enter on the actual search input before
+  // YouTube handles the event and navigate directly to the proxied /results URL.
+  document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || event.key !== "Enter") return;
+    const input = event.target?.closest?.("#search, input[name=\"search_query\"]");
+    if (!input) return;
+
+    const query = String(input.value || "").trim();
+    if (!query) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const results = new URL("https://www.youtube.com/results");
+    results.searchParams.set("search_query", query);
+    location.href = prefix + encodeURIComponent(results.href);
+  }, true);
+
   document.addEventListener("click", (event) => {
     const anchor = event.target?.closest?.("a[href]");
     if (!anchor) return;
